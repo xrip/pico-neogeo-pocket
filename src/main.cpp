@@ -854,7 +854,7 @@ stdio_init_all();
     while (true) {
 
         graphics_set_mode(TEXTMODE_DEFAULT);
-        filebrowser(HOME_DIR, "ng,ngc");
+        filebrowser(HOME_DIR, "ngp,ngc");
         graphics_set_mode(GRAPHICSMODE_DEFAULT);
         rom.data = (uint8_t *)romdata;
         rom.length = rom_size;
