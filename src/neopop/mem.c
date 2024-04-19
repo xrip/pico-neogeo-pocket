@@ -320,7 +320,7 @@ void post_write(_u32 address)
 
 //=============================================================================
 
-_u8 loadB(_u32 address)
+__always_inline _u8 loadB(_u32 address)
 {
 	_u8* ptr = translate_address_read(address);
 	if (ptr == NULL)
@@ -329,42 +329,31 @@ _u8 loadB(_u32 address)
 		return *ptr;
 }
 
-_u16 loadW(_u32 address)
+__always_inline _u16 loadW(_u32 address)
 {
 	_u8* ptr = translate_address_read(address);
 
 	if (ptr == NULL)
 		return 0;
 	else {
-        register _u16 b1 = *ptr++;
-        register _u16 b0 = *ptr;
-        _u16 result  = b1 | (b0 << 8);
-//        printf("pc: 0x%x loadW 0x%x : 0x%x\r\n", pc, address, result);
-        return result;
-//        return *ptr;
+        return (_u16)((ptr[1] << 8) + ( ptr[0] ));
     }
 }
 
-_u32 loadL(_u32 address)
+__always_inline _u32 loadL(_u32 address)
 {
 
 	_u8* ptr = translate_address_read(address);
 	if (ptr == NULL)
 		return 0;
 	else {
-        register _u32 b3 = *ptr++;
-        register _u32 b2 = *ptr++;
-        register _u32 b1 = *ptr++;
-        register _u32 b0 = *ptr;
-        register _u32 result = (b0 << 24 | b1 << 16 | b2 << 8 | b3);
-//        printf("pc: 0x%x loadL 0x%x : 0x%x\r\n", pc, address, result);
-        return result;
+        return (_u32)((ptr[3] << 24) + (ptr[2] << 16) + (ptr[1] << 8) + (ptr[0]));
     }
 }
 
 //=============================================================================
 
-void storeB(_u32 address, _u8 data)
+__always_inline void storeB(_u32 address, _u8 data)
 {
 	_u8* ptr = translate_address_write(address);
 
@@ -376,7 +365,7 @@ void storeB(_u32 address, _u8 data)
 	}
 }
 
-void storeW(_u32 address, _u16 data)
+__always_inline void storeW(_u32 address, _u16 data)
 {
 	_u8* ptr = translate_address_write(address);
 
@@ -384,13 +373,13 @@ void storeW(_u32 address, _u16 data)
 	if (ptr)
 	{
 //        printf("pc: 0x%x storeW 0x%x : 0x%x\r\n", pc, address, data);
-		*ptr++ = (_u8) data;
-		*ptr = (_u8)(data >> 8);
+        ptr[0] = (data & 0x00ff);
+        ptr[1] = (data & 0xff00) >> 8;
 		post_write(address);
 	}
 }
 
-void storeL(_u32 address, _u32 data)
+__always_inline void storeL(_u32 address, _u32 data)
 {
 	_u8* ptr = translate_address_write(address);
 
@@ -398,15 +387,17 @@ void storeL(_u32 address, _u32 data)
 	if (ptr)
 	{
 //        printf("pc: 0x%x storeL 0x%x : 0x%x\r\n", pc, address, data);
-		storeW(address, data & 0xFFFF);
-		storeW(address+2, data >> 16);
+        ptr[0] = (data & 0x000000ff);
+        ptr[1] = (data & 0x0000ff00) >> 8;
+        ptr[2] = (data & 0x00ff0000) >> 16;
+        ptr[3] = (data & 0xff000000) >> 24;
 		post_write(address);
 	}
 }
 
 //=============================================================================
 
-static _u8 systemMemory[] = 
+const static _u8 systemMemory[] =
 {
 	// 0x00												// 0x08
 	0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x08, 0xFF, 0xFF,

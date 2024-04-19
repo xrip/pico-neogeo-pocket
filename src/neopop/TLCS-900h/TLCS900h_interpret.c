@@ -81,14 +81,14 @@ _u8		cycles_extra;	//How many extra state changes?
 
 //=========================================================================
 
-_u16 fetch16(void)
+__always_inline _u16 fetch16(void)
 {
 	_u16 a = loadW(pc);
 	pc += 2;
 	return a;
 }
 
-_u32 fetch24(void)
+__always_inline _u32 fetch24(void)
 {
     //printf("wtf %x \r\n", pc);
 	_u32 b, a = loadW(pc);
@@ -97,7 +97,7 @@ _u32 fetch24(void)
 	return (b << 16) | a;
 }
 
-_u32 fetch32(void)
+__always_inline _u32 fetch32(void)
 {
 	_u32 a = loadL(pc);
 	pc += 4;
@@ -136,17 +136,17 @@ void parityW(_u16 value)
 
 //=========================================================================
 
-void push8(_u8 data)	{ REGXSP -= 1;	storeB(REGXSP, data);}
-void push16(_u16 data)	{ REGXSP -= 2;	storeW(REGXSP, data);}
-void push32(_u32 data)	{ REGXSP -= 4;	storeL(REGXSP, data);}
+__always_inline void push8(_u8 data)	{ REGXSP -= 1;	storeB(REGXSP, data);}
+__always_inline void push16(_u16 data)	{ REGXSP -= 2;	storeW(REGXSP, data);}
+__always_inline void push32(_u32 data)	{ REGXSP -= 4;	storeL(REGXSP, data);}
 
-_u8 pop8(void)	 {  _u8 temp = loadB(REGXSP); REGXSP += 1; return temp;}
-_u16 pop16(void) { _u16 temp = loadW(REGXSP); REGXSP += 2; return temp;}
-_u32 pop32(void) { _u32 temp = loadL(REGXSP); REGXSP += 4; return temp;}
+__always_inline _u8 pop8(void)	 {  _u8 temp = loadB(REGXSP); REGXSP += 1; return temp;}
+__always_inline _u16 pop16(void) { _u16 temp = loadW(REGXSP); REGXSP += 2; return temp;}
+__always_inline _u32 pop32(void) { _u32 temp = loadL(REGXSP); REGXSP += 4; return temp;}
 
 //=============================================================================
 
-_u16 generic_DIV_B(_u16 val, _u8 div)
+__always_inline _u16 generic_DIV_B(_u16 val, _u8 div)
 {
 	if (div == 0)
 	{ 
@@ -162,7 +162,7 @@ _u16 generic_DIV_B(_u16 val, _u8 div)
 	}
 }
 
-_u32 generic_DIV_W(_u32 val, _u16 div)
+__always_inline _u32 generic_DIV_W(_u32 val, _u16 div)
 {
 	if (div == 0)
 	{ 
@@ -180,7 +180,7 @@ _u32 generic_DIV_W(_u32 val, _u16 div)
 
 //=============================================================================
 
-_u16 generic_DIVS_B(_s16 val, _s8 div)
+__always_inline _u16 generic_DIVS_B(_s16 val, _s8 div)
 {
 	if (div == 0)
 	{
@@ -196,7 +196,7 @@ _u16 generic_DIVS_B(_s16 val, _s8 div)
 	}
 }
 
-_u32 generic_DIVS_W(_s32 val, _s16 div)
+__always_inline _u32 generic_DIVS_W(_s32 val, _s16 div)
 {
 	if (div == 0)
 	{
@@ -214,7 +214,7 @@ _u32 generic_DIVS_W(_s32 val, _s16 div)
 
 //=============================================================================
 
-_u8 generic_ADD_B(_u8 dst, _u8 src)
+__always_inline _u8 generic_ADD_B(_u8 dst, _u8 src)
 {
 	_u8 half = (dst & 0xF) + (src & 0xF);
 	_u32 resultC = (_u32)dst + (_u32)src;
@@ -234,7 +234,7 @@ _u8 generic_ADD_B(_u8 dst, _u8 src)
 	return result;
 }
 
-_u16 generic_ADD_W(_u16 dst, _u16 src)
+__always_inline _u16 generic_ADD_W(_u16 dst, _u16 src)
 {
 	_u16 half = (dst & 0xF) + (src & 0xF);
 	_u32 resultC = (_u32)dst + (_u32)src;
@@ -254,7 +254,7 @@ _u16 generic_ADD_W(_u16 dst, _u16 src)
 	return result;
 }
 
-_u32 generic_ADD_L(_u32 dst, _u32 src)
+__always_inline _u32 generic_ADD_L(_u32 dst, _u32 src)
 {
 	_u64 resultC = (_u64)dst + (_u64)src;
 	_u32 result = (_u32)(resultC & 0xFFFFFFFF);
@@ -274,7 +274,7 @@ _u32 generic_ADD_L(_u32 dst, _u32 src)
 
 //=============================================================================
 
-_u8 generic_ADC_B(_u8 dst, _u8 src)
+__always_inline _u8 generic_ADC_B(_u8 dst, _u8 src)
 {
 	_u8 half = (dst & 0xF) + (src & 0xF) + FLAG_C;
 	_u32 resultC = (_u32)dst + (_u32)src + (_u32)FLAG_C;
@@ -294,7 +294,7 @@ _u8 generic_ADC_B(_u8 dst, _u8 src)
 	return result;
 }
 
-_u16 generic_ADC_W(_u16 dst, _u16 src)
+__always_inline _u16 generic_ADC_W(_u16 dst, _u16 src)
 {
 	_u16 half = (dst & 0xF) + (src & 0xF) + FLAG_C;
 	_u32 resultC = (_u32)dst + (_u32)src + (_u32)FLAG_C;
@@ -314,7 +314,7 @@ _u16 generic_ADC_W(_u16 dst, _u16 src)
 	return result;
 }
 
-_u32 generic_ADC_L(_u32 dst, _u32 src)
+__always_inline _u32 generic_ADC_L(_u32 dst, _u32 src)
 {
 	_u64 resultC = (_u64)dst + (_u64)src + (_u64)FLAG_C;
 	_u32 result = (_u32)(resultC & 0xFFFFFFFF);
@@ -334,7 +334,7 @@ _u32 generic_ADC_L(_u32 dst, _u32 src)
 
 //=============================================================================
 
-_u8 generic_SUB_B(_u8 dst, _u8 src)
+__always_inline _u8 generic_SUB_B(_u8 dst, _u8 src)
 {
 	_u8 half = (dst & 0xF) - (src & 0xF);
 	_u32 resultC = (_u32)dst - (_u32)src;
@@ -354,7 +354,7 @@ _u8 generic_SUB_B(_u8 dst, _u8 src)
 	return result;
 }
 
-_u16 generic_SUB_W(_u16 dst, _u16 src)
+__always_inline _u16 generic_SUB_W(_u16 dst, _u16 src)
 {
 	_u16 half = (dst & 0xF) - (src & 0xF);
 	_u32 resultC = (_u32)dst - (_u32)src;
@@ -374,7 +374,7 @@ _u16 generic_SUB_W(_u16 dst, _u16 src)
 	return result;
 }
 
-_u32 generic_SUB_L(_u32 dst, _u32 src)
+__always_inline _u32 generic_SUB_L(_u32 dst, _u32 src)
 {
 	_u64 resultC = (_u64)dst - (_u64)src;
 	_u32 result = (_u32)(resultC & 0xFFFFFFFF);
@@ -394,7 +394,7 @@ _u32 generic_SUB_L(_u32 dst, _u32 src)
 
 //=============================================================================
 
-_u8 generic_SBC_B(_u8 dst, _u8 src)
+__always_inline _u8 generic_SBC_B(_u8 dst, _u8 src)
 {
 	_u8 half = (dst & 0xF) - (src & 0xF) - FLAG_C;
 	_u32 resultC = (_u32)dst - (_u32)src - (_u32)FLAG_C;
@@ -414,7 +414,7 @@ _u8 generic_SBC_B(_u8 dst, _u8 src)
 	return result;
 }
 
-_u16 generic_SBC_W(_u16 dst, _u16 src)
+__always_inline _u16 generic_SBC_W(_u16 dst, _u16 src)
 {
 	_u16 half = (dst & 0xF) - (src & 0xF) - FLAG_C;
 	_u32 resultC = (_u32)dst - (_u32)src - (_u32)FLAG_C;
@@ -434,7 +434,7 @@ _u16 generic_SBC_W(_u16 dst, _u16 src)
 	return result;
 }
 
-_u32 generic_SBC_L(_u32 dst, _u32 src)
+__always_inline _u32 generic_SBC_L(_u32 dst, _u32 src)
 {
 	_u64 resultC = (_u64)dst - (_u64)src - (_u64)FLAG_C;
 	_u32 result = (_u32)(resultC & 0xFFFFFFFF);
@@ -655,7 +655,7 @@ static void ExRC()
 //=========================================================================
 
 //Address Mode & Register Code
-static void (*decodeExtra[256])() = 
+static void (*decodeExtra[256])() =
 {
 /*0*/	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 /*1*/	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
