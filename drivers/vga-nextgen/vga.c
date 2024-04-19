@@ -308,13 +308,16 @@ void __time_critical_func() dma_handler_VGA() {
             }
             break;
         }
-        case GRAPHICSMODE_DEFAULT:
-            input_buffer_8bit = input_buffer + y * width;
+        case GRAPHICSMODE_DEFAULT: {
+            uint16_t *input_buffer_16bit = (uint16_t *) (input_buffer + y * width * 2);
             for (int i = width; i--;) {
-                *output_buffer_16bit++ = current_palette[*input_buffer_8bit];
-                *output_buffer_16bit++ = current_palette[*input_buffer_8bit++];
+                uint8_t color = (*input_buffer_16bit++) & 0xFF;
+//                *output_buffer_16bit++ = current_palette[color];
+                *output_buffer_16bit++ = current_palette[color];
+                *output_buffer_16bit++ = current_palette[color];
             }
             break;
+        }
         case GRAPHICSMODE_ASPECT:
             input_buffer_8bit = input_buffer + y * width;
             for (int i = width; i--;) {

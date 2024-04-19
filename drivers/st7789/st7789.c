@@ -221,6 +221,15 @@ void st7789_dma_pixels(const uint16_t* pixels, const uint num_pixels) {
     dma_channel_hw_addr(st7789_chan)->ctrl_trig = ctrl | DMA_CH0_CTRL_TRIG_INCR_READ_BITS;
 }
 
+inline uint16_t rgb444_to_rgb565(uint16_t rgb444) {
+    uint8_t r = (rgb444 >> 8) & 0x0F; // Extract red component
+    uint8_t g = (rgb444 >> 4) & 0x0F; // Extract green component
+    uint8_t b = rgb444 & 0x0F;        // Extract blue component
+
+
+    return RGB888(b*16,g*16,r*16);
+}
+
 void __inline __scratch_y("refresh_lcd") refresh_lcd() {
     switch (graphics_mode) {
         case TEXTMODE_DEFAULT:
@@ -247,23 +256,27 @@ void __inline __scratch_y("refresh_lcd") refresh_lcd() {
             stop_pixels();
             break;
         case GRAPHICSMODE_DEFAULT: {
-            const uint8_t* bitmap = graphics_buffer;
+            const uint16_t* bitmap = (uint16_t *)graphics_buffer;
             lcd_set_window(graphics_buffer_shift_x, graphics_buffer_shift_y, graphics_buffer_width,
                            graphics_buffer_height);
             uint32_t i = graphics_buffer_width * graphics_buffer_height;
             start_pixels();
-            // st7789_dma_pixels(graphics_buffer, i);
-            for (int y = 0; y < graphics_buffer_height; y++) {
+//             st7789_dma_pixels((uint16_t *)graphics_buffer, i*2);
+            /*
+             for (int y = 0; y < graphics_buffer_height; y++) {
                 for (int x = 0; x < graphics_buffer_width; x++) {
                     st7789_lcd_put_pixel(pio, sm, palette[*bitmap++ >> 6]);
                 }
                 for (int x = 0; x < graphics_buffer_shift_x; x++)
                     st7789_lcd_put_pixel(pio, sm, 0x00);
             }
-//            while (--i) {
-//               st7789_lcd_put_pixel(pio, sm, palette[*bitmap ]);
-//               st7789_lcd_put_pixel(pio, sm, palette[*bitmap++ ]);
-//            }
+             */
+            for (int z = 0; z<i; z++) {
+                const uint16_t color = (bitmap[z]);
+//               st7789_lcd_put_pixel(pio, sm, color);
+               st7789_lcd_put_pixel(pio, sm, color);
+             //  st7789_lcd_put_pixel(pio, sm, color);
+            }
             stop_pixels();
         }
     }
