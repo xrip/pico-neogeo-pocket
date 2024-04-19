@@ -127,7 +127,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         hardware_pwm
         hardware_flash
 
-#		tinyusb_host tinyusb_board
+		tinyusb_host tinyusb_board
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -164,8 +164,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 
 		SMS_SINGLE_FILE=1
 )
-pico_enable_stdio_usb(${PROJECT_NAME} 1)
-pico_enable_stdio_uart(${PROJECT_NAME} 1)
+pico_enable_stdio_usb(${PROJECT_NAME} 0)
+pico_enable_stdio_uart(${PROJECT_NAME} 0)
 #    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 #            COMMAND picotool info ${OUTPUT_DIR}/$<TARGET_PROPERTY:OUTPUT_NAME>.uf2 &&
 #            COMMAND picotool reboot -f -u & mode COM27 baud=12 parity=n data=8 stop=1

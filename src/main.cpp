@@ -132,10 +132,10 @@ __not_in_flash_func(process_kbd_report)(hid_keyboard_report_t const* report, hid
     //-------------------------------------------------------------------------
 }
 
-//Ps2Kbd_Mrmltr ps2kbd(
-//    pio1,
-//    0,
-//    process_kbd_report);
+Ps2Kbd_Mrmltr ps2kbd(
+    pio1,
+    0,
+    process_kbd_report);
 
 
 
@@ -706,7 +706,7 @@ void menu() {
 void __time_critical_func(render_core)() {
     multicore_lockout_victim_init();
 
-//    ps2kbd.init_gpio();
+    ps2kbd.init_gpio();
     nespad_begin(clock_get_hz(clk_sys) / 1000, NES_GPIO_CLK, NES_GPIO_DATA, NES_GPIO_LAT);
 
     graphics_init();
@@ -731,7 +731,7 @@ void __time_critical_func(render_core)() {
 #ifdef TFT
             refresh_lcd();
 #endif
-//            ps2kbd.tick();
+            ps2kbd.tick();
             nespad_tick();
 
             last_frame_tick = tick;
@@ -776,7 +776,15 @@ BOOL system_io_flash_write(_u8* buffer, _u32 bufferLength) {
 }
 
 void system_VBL(void) {
-
+    uint8_t buttons = 0;
+    if (gamepad1_bits.left || keyboard_bits.left) buttons |= 0x04;
+    if (gamepad1_bits.right || keyboard_bits.right) buttons |= 0x08;
+    if (gamepad1_bits.up || keyboard_bits.up) buttons |= 0x01;
+    if (gamepad1_bits.down || keyboard_bits.down) buttons |= 0x02;
+    if (gamepad1_bits.a || keyboard_bits.a) buttons |= 0x10;
+    if (gamepad1_bits.b || keyboard_bits.b) buttons |= 0x20;
+    if (gamepad1_bits.start || keyboard_bits.start) buttons |= 0x40;
+    ram[0x6F82] = buttons;
     // frame drawn
 }
 
@@ -827,7 +835,7 @@ system_get_string(STRINGS string_id)
 }
 int main() {
     overclock();
-stdio_init_all();
+
     sem_init(&vga_start_semaphore, 0, 1);
     multicore_launch_core1(render_core);
     sem_release(&vga_start_semaphore);
