@@ -464,7 +464,7 @@ typedef struct __attribute__((__packed__)) {
 } MenuItem;
 
 uint16_t frequencies[] = { 378, 396, 404, 408, 412, 416, 420, 424, 432 };
-uint8_t frequency_index = 0;
+uint8_t frequency_index = 4;
 
 bool overclock() {
     hw_set_bits(&vreg_and_chip_reset_hw->vreg, VREG_AND_CHIP_RESET_VREG_VSEL_BITS);
@@ -752,12 +752,12 @@ int frame_timer_start = 0;
 uint8_t system_frameskip_key = 1;
 extern "C" {
 void system_message(char *vaMessage, ...) {
-    va_list vl;
+/*    va_list vl;
 
     va_start(vl, vaMessage);
     vprintf(vaMessage, vl);
     va_end(vl);
-    printf("\n");
+    printf("\n");*/
 }
 
 void system_sound_chipreset(void) {}

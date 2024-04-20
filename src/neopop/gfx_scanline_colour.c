@@ -136,9 +136,14 @@ static void gfx_draw_scroll1(_u8 depth)
 		data16 = *(_u16*)(ram + 0x9000 + ((tx + ((line >> 3) << 5)) << 1));
 		
 		//Draw the line of the tile
-		drawPattern((tx << 3) - scroll1x, data16 & 0x01FF, 
-			(data16 & 0x4000) ? (7 - row) : row, data16 & 0x8000, (_u16*)(ram + 0x8280),
-			(data16 & 0x1E00) >> 9, depth);
+		drawPattern(
+                (tx << 3) - scroll1x,
+                data16 & 0x01FF,
+			(data16 & 0x4000) ? (7 - row) : row,
+            data16 & 0x8000,
+            (_u16*)(ram + 0x8280),
+			(data16 & 0x1E00) >> 9,
+            depth);
 	}
 }
 
@@ -157,7 +162,8 @@ static void gfx_draw_scroll2(_u8 depth)
 		
 		//Draw the line of the tile
 		drawPattern((tx << 3) - scroll2x, data16 & 0x01FF, 
-			(data16 & 0x4000) ? (7 - row) : row, data16 & 0x8000, (_u16*)(ram + 0x8300),
+			(data16 & 0x4000) ? (7 - row) : row, data16 & 0x8000,
+            (_u16*)(ram + 0x8300),
 			(data16 & 0x1E00) >> 9, depth);
 	}
 }
@@ -272,7 +278,9 @@ void gfx_draw_scanline_colour(void)
 				row = (scanline - y) & 7;	//Which row?
 				drawPattern((_u8)x, data16 & 0x01FF, 
 					(data16 & 0x4000) ? 7 - row : row, data16 & 0x8000,
-					(_u16*)(ram + 0x8200), ram[0x8C00 + spr] & 0xF, priority << 1); 
+					(_u16*)(ram + 0x8200),
+                    ram[0x8C00 + spr] & 0xF,
+                    priority << 1);
 			}
 		}
 

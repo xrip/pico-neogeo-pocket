@@ -1,3 +1,4 @@
+#pragma GCC optimize("Ofast")
 //---------------------------------------------------------------------------
 // NEOPOP : Emulator as in Dreamland
 //
