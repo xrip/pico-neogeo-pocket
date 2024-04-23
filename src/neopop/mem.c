@@ -126,7 +126,7 @@ static void memory_error(_u32 address, BOOL read)
 
 //=============================================================================
 
-void* translate_address_read(_u32 address)
+static inline void* translate_address_read(_u32 address)
 {
 	address &= 0xFFFFFF;
 
@@ -198,7 +198,7 @@ void* translate_address_read(_u32 address)
 
 //=============================================================================
 
-void* translate_address_write(_u32 address)
+static inline void* translate_address_write(_u32 address)
 {	
 	address &= 0xFFFFFF;
 

@@ -97,7 +97,6 @@ void emulate(void)
 	{
 		updateTimers(TLCS900h_interpret());
 		if (Z80ACTIVE) Z80EMULATE
-		updateTimers(TLCS900h_interpret());
 	}
 }
 

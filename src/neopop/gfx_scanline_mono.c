@@ -96,7 +96,7 @@ static void Plot(_u8 x, _u8* palette_ptr, _u16 pal_hi, _u8 index, _u8 depth)
 		cfb_scanline[x] = ~(r | g | b);
 }
 
-static void drawPattern(_u8 screenx, _u16 tile, _u8 tiley, _u16 mirror, 
+static void drawPattern(_u8 screenx, _u16 tile, _u8 tiley, _u16 mirror,
 				 _u8* palette_ptr, _u16 pal, _u8 depth)
 {
 	//Get the data for th e "tiley'th" line of "tile".
@@ -137,6 +137,7 @@ static void gfx_draw_scroll1(_u8 depth)
 	row = line & 7;	//Which row?
 
 	//Draw Foreground scroll plane (Scroll 1)
+#pragma GCC unroll 32
 	for (tx = 0; tx < 32; tx++)
 	{
 		data16 = *(_u16*)(ram + 0x9000 + ((tx + ((line >> 3) << 5)) << 1));
@@ -157,6 +158,7 @@ static void gfx_draw_scroll2(_u8 depth)
 	row = line & 7;	//Which row?
 
 	//Draw Background scroll plane (Scroll 2)
+#pragma GCC unroll 32
 	for (tx = 0; tx < 32; tx++)
 	{
 		data16 = *(_u16*)(ram + 0x9800 + ((tx + ((line >> 3) << 5)) << 1));

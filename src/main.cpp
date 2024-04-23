@@ -464,7 +464,7 @@ typedef struct __attribute__((__packed__)) {
 } MenuItem;
 
 uint16_t frequencies[] = { 378, 396, 404, 408, 412, 416, 420, 424, 432 };
-uint8_t frequency_index = 4;
+uint8_t frequency_index = 0;
 
 bool overclock() {
     hw_set_bits(&vreg_and_chip_reset_hw->vreg, VREG_AND_CHIP_RESET_VREG_VSEL_BITS);
@@ -772,7 +772,7 @@ BOOL system_io_flash_read(_u8* buffer, _u32 bufferLength) {
 }
 ///
 BOOL system_io_flash_write(_u8* buffer, _u32 bufferLength) {
-    return false;
+    return true;
 }
 
 void system_VBL(void) {

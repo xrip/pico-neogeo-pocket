@@ -54,8 +54,8 @@
 
 void reset_memory(void);
 
-void* translate_address_read(_u32 address);
-void* translate_address_write(_u32 address);
+//static inline void* translate_address_read(_u32 address);
+//static inline void* translate_address_write(_u32 address);
 
 void dump_memory(_u32 start, _u32 length);
 
