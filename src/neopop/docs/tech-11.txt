@@ -1,0 +1,101 @@
+	NEOGEO POCKET TECHNICAL DOCUMENTATION 1.1
+	By Gollum (c) 2000 Emu5ever
+
+Specs :
+-----
+- 16-bit CPU TOSHIBA TLCS-900h at 6.144 Mhz
+- 8-bit CPU Z80 for sound at 3.072 Mhz
+- Screen size is 160x152 pixels
+- Two virtual screens with scrolling
+- 64 sprites/frame
+- 4 colors/sprite and 4 colors/tile (including transparency color)
+- 48 palettes (16 for sprites, 16 for first screen and 16 for second screen)
+- There are 146 colors possible out of 4096 (colors in 444 RGB format)
+
+Memory Map :
+----------
+
+000000 -> 000100 CPU Internal RAM (Timers/DMA/Z80)
+000000 -> 006FFF CPU Work RAM
+007000 -> 007FFF Sound RAM
+008000 -> 00BFFF Video RAM
+200000 -> 3FFFFF ROM (GAME CARTRIDGE)
+800000 -> 9FFFFF Extra ROM (32 Mbit games)
+FF0000 -> FFFFFF NEOGEO POCKET BIOS (64 Ko)
+
+Interesting Memory Locations :
+----------------------------
+
+6F82         : Controller Status Byte
+6F87 	     : Language
+		0 = Japanese
+		1 = English
+6F91 	     : Color Mode Selection
+		00 = Neogeo Pocket Classic (Black & White)
+		10 = Neogeo Pocket Color
+6FB8 -> 6FFF : Interrupt Address Table
+8000 	     : Frame #0 Priority Register
+8002 	     : X Start
+8003 	     : Y Start
+8004 	     : X Size (usually A0 = 160)
+8005 	     : Y Size (usually 98 = 152)
+8009         : Current Y line
+8020	     : Sprite Plane Scroll X
+8021	     : Sprite Plane Scroll Y
+8030         : Frame #1 Priority Register
+8032	     : Frame #0 Scroll X
+8033	     : Frame #0 Scroll Y
+8034	     : Frame #1 Scroll X
+8035	     : Frame #1 Scroll Y
+8100 -> 8117 : Palette Table for Black&White games
+8118	     : Background Selection Register
+8200 -> 827F : Sprite Palette Table
+		16 palettes * 4 colors x 2 bytes
+		R=G=B=0..15 (4 bits)
+		1st byte = GB
+		2nd byte = 0R
+8280 -> 82FF : Foreground Palette Table
+		see Sprite Palette Table
+8300 -> 837F : Background Palette Table
+		see Background Palette Table
+8800 -> 88FF : Sprites
+		64 sprites x 4 bytes
+		1st byte TTTTTTTT
+		2nd byte HVBPPPPT
+			H=horizontal flipping (1 bit)
+			V=vertical flipping (1 bit)
+			B=palette selection for Black&White games
+			P=palette number (0..15) (4 bits)
+			T=tile number into pattern table (9 bits)
+		3rd byte = x position
+		4th byte = y position			
+8C00 -> 8C3F : Sprites Palette Numbers
+		64 sprites x 1 byte
+9000 -> 97FF : Frame #0 Map
+		32 tiles x 20 tiles
+		1 tile=2 bytes
+		1st byte TTTTTTTT
+		2nd byte HVBPPPPT
+			H=horizontal flipping (1 bit)
+			V=vertical flipping (1 bit)
+			B=palette selection for Black&White games
+			P=palette number (0..15) (4 bits)
+			T=tile number into pattern table (9 bits)
+9800 -> 9FFF : Frame #1 Map
+		32 tiles x 20 tiles
+		1 tile=2 bytes
+		1st byte TTTTTTTT
+		2nd byte HVBPPPPT
+			H=horizontal flipping (1 bit)
+			V=vertical flipping (1 bit)
+			B=palette selection for Black&White games
+			P=palette number (0..15) (4 bits)
+			T=tile number into pattern table (9 bits)
+A000 -> BFFF : Pattern Table
+		1 tile=8x8 pixels=16 bytes
+		1 byte=4 pixels
+		2 bits=colour (0..3)
+		bits order : 10 32 54 76
+
+
+Greets to Judge (Rape!) for some additions/corrections.
