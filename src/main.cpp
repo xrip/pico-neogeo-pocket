@@ -180,9 +180,12 @@ __not_in_flash_func(process_kbd_report)(hid_keyboard_report_t const* report, hid
     //-------------------------------------------------------------------------
 }
 
+#ifndef PS2KBD_GPIO_FIRST
+#define PS2KBD_GPIO_FIRST 0
+#endif
 Ps2Kbd_Mrmltr ps2kbd(
     pio1,
-    0,
+    PS2KBD_GPIO_FIRST,
     process_kbd_report);
 
 
@@ -244,6 +247,43 @@ bool isExecutable(const char pathname[255],const char *extensions) {
     return false;
 }
 
+#if PICO_RP2350
+/* flash_range_erase/program end with the boot-time XIP setup (QSPI clock =
+ * clk_sys / PICO_FLASH_SPI_CLKDIV = clk_sys / 2) and flush the XIP cache, so
+ * the first fetch back in flash code would run the flash far too fast at the
+ * overclocked clk_sys (z0p2: the board hangs while loading a ROM). Do the
+ * write and the restore of the QMI timing set by overclock() from RAM. */
+static void __no_inline_not_in_flash_func(flash_erase_keep_qmi)(uint32_t offs, size_t count) {
+    const uint32_t timing = qmi_hw->m[0].timing;
+    const uint32_t rfmt   = qmi_hw->m[0].rfmt;
+    const uint32_t rcmd   = qmi_hw->m[0].rcmd;
+    flash_range_erase(offs, count);
+    qmi_hw->m[0].timing = timing;
+    qmi_hw->m[0].rfmt   = rfmt;
+    qmi_hw->m[0].rcmd   = rcmd;
+    __asm volatile ("dsb; isb" ::: "memory");
+}
+
+static void __no_inline_not_in_flash_func(flash_program_keep_qmi)(uint32_t offs, const uint8_t *data, size_t count) {
+    const uint32_t timing = qmi_hw->m[0].timing;
+    const uint32_t rfmt   = qmi_hw->m[0].rfmt;
+    const uint32_t rcmd   = qmi_hw->m[0].rcmd;
+    flash_range_program(offs, data, count);
+    qmi_hw->m[0].timing = timing;
+    qmi_hw->m[0].rfmt   = rfmt;
+    qmi_hw->m[0].rcmd   = rcmd;
+    __asm volatile ("dsb; isb" ::: "memory");
+}
+#else
+static void flash_erase_keep_qmi(uint32_t offs, size_t count) {
+    flash_range_erase(offs, count);
+}
+
+static void flash_program_keep_qmi(uint32_t offs, const uint8_t *data, size_t count) {
+    flash_range_program(offs, data, count);
+}
+#endif
+
 bool filebrowser_loadfile(const char pathname[256]) {
     UINT bytes_read = 0;
     FIL file;
@@ -256,7 +296,13 @@ bool filebrowser_loadfile(const char pathname[256]) {
     FILINFO fileinfo;
     f_stat(pathname, &fileinfo);
     rom_size = fileinfo.fsize;
+#if ZERO
+    /* The top 512 KB of the flash stay untouched (pico-launcher lives in the
+       last 260 KB). */
+    if (PICO_FLASH_SIZE_BYTES - (512u << 10) - FLASH_TARGET_OFFSET < ((fileinfo.fsize + FLASH_SECTOR_SIZE - 1) & ~(FLASH_SECTOR_SIZE - 1))) {
+#else
     if (PICO_FLASH_SIZE_BYTES - FLASH_TARGET_OFFSET < fileinfo.fsize) {
+#endif
         draw_text("ERROR: ROM too large! Canceled!!", window_x + 1, window_y + 2, 13, 1);
         sleep_ms(5000);
         return false;
@@ -270,7 +316,7 @@ bool filebrowser_loadfile(const char pathname[256]) {
     multicore_lockout_start_blocking();
     auto flash_target_offset = FLASH_TARGET_OFFSET;
     const uint32_t ints = save_and_disable_interrupts();
-    flash_range_erase(flash_target_offset, fileinfo.fsize);
+    flash_erase_keep_qmi(flash_target_offset, (fileinfo.fsize + FLASH_SECTOR_SIZE - 1) & ~(FLASH_SECTOR_SIZE - 1));
     restore_interrupts(ints);
 
     if (FR_OK == f_open(&file, pathname, FA_READ)) {
@@ -281,7 +327,7 @@ bool filebrowser_loadfile(const char pathname[256]) {
 
             if (bytes_read) {
                 const uint32_t ints = save_and_disable_interrupts();
-                flash_range_program(flash_target_offset, buffer, FLASH_PAGE_SIZE);
+                flash_program_keep_qmi(flash_target_offset, buffer, FLASH_PAGE_SIZE);
                 restore_interrupts(ints);
 
                 gpio_put(PICO_DEFAULT_LED_PIN, flash_target_offset >> 13 & 1);
@@ -517,7 +563,12 @@ typedef struct __attribute__((__packed__)) {
     char value_list[15][10];
 } MenuItem;
 
-uint16_t frequencies[] = { 378, 396, 404, 408, 412, 416, 420, 424, 432 };
+#ifndef CPU_FREQ
+#define CPU_FREQ 378
+#endif
+#define FREQ_STR_(x) #x
+#define FREQ_STR(x) FREQ_STR_(x)
+uint16_t frequencies[] = { CPU_FREQ, 396, 404, 408, 412, 416, 420, 424, 432 };
 uint8_t frequency_index = 0;
 
 #if PICO_RP2350
@@ -682,7 +733,7 @@ const MenuItem menu_items[] = {
 {},
 {
     "Overclocking: %s MHz", ARRAY, &frequency_index, &overclock, count_of(frequencies) - 1,
-    { "378", "396", "404", "408", "412", "416", "420", "424", "432" }
+    { FREQ_STR(CPU_FREQ), "396", "404", "408", "412", "416", "420", "424", "432" }
 },
 { "Press START / Enter to apply", NONE },
     { "Reset to ROM select", ROM_SELECT },

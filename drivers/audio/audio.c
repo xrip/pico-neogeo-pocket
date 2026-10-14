@@ -27,6 +27,14 @@
 
 #include "audio.h"
 
+/* I2S pins: DIN, then BCK and LRCK = BCK + 1. The board header may set them. */
+#ifndef AUDIO_DATA_PIN
+#define AUDIO_DATA_PIN 26
+#endif
+#ifndef AUDIO_CLOCK_PIN
+#define AUDIO_CLOCK_PIN 27
+#endif
+
 #ifdef AUDIO_PWM_PIN
 #include "hardware/pwm.h"
 #include "hardware/clocks.h"
@@ -39,8 +47,8 @@ i2s_config_t i2s_get_default_config(void) {
     i2s_config_t i2s_config = {
 		.sample_freq = 44100, 
 		.channel_count = 2,
-		.data_pin = 26,
-		.clock_pin_base = 27,
+		.data_pin = AUDIO_DATA_PIN,
+		.clock_pin_base = AUDIO_CLOCK_PIN,
 		.pio = pio1,
 		.sm = 0,
         .dma_channel = 0,

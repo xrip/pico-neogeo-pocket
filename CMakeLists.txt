@@ -20,7 +20,8 @@ set(PICO_PLATFORM "rp2350" CACHE STRING "Chip type")
 
 # Board: murmulator (MURMULATOR 1.x) or olimex-pico-pc (Olimex RP2040-PICO-PC)
 #set(PICO_BOARD "murmulator" CACHE STRING "Board type")
-set(PICO_BOARD "olimex-pico-pc" CACHE STRING "Board type")
+#set(PICO_BOARD "olimex-pico-pc" CACHE STRING "Board type")
+set(PICO_BOARD "waveshare_rp2350_pizero" CACHE STRING "Board type")
 
 cmake_minimum_required(VERSION 3.13)
 include(pico_sdk_import.cmake)
@@ -36,6 +37,14 @@ option(ILI9341 "Enable TFT ILI9341 display" OFF)
 option(HDMI "Enable HDMI display" ON)
 option(TV "Enable TV composite output" OFF)
 option(SOFTTV "Enable TV soft composite output" OFF)
+
+if (${PICO_BOARD} MATCHES "waveshare_rp2350_pizero")
+	# Waveshare RP2350-PiZero (z0p2): RP2350B, 16 MB flash, HDMI on GPIO32..39,
+	# sound through an I2S module (PCM5102A) on GP10..12, USB keyboard.
+	set(HDMI ON CACHE BOOL "Enable HDMI display" FORCE)
+	set(I2S ON CACHE BOOL "Enable I2S sound" FORCE)
+	set(I2S_CS4334 OFF CACHE BOOL "Enable I2S CS4334 sound" FORCE)
+endif()
 
 
 set(CMAKE_C_STANDARD 11)
@@ -89,6 +98,8 @@ if (${PICO_PLATFORM} MATCHES "rp2040")
 else()
 	if (${PICO_BOARD} MATCHES "olimex-pico-pc")
 		SET(BUILD_NAME "PCp2-${PROJECT_NAME}")
+	elseif (${PICO_BOARD} MATCHES "waveshare_rp2350_pizero")
+		SET(BUILD_NAME "z0p2-${PROJECT_NAME}")
 	else()
 		SET(BUILD_NAME "m1p2-${PROJECT_NAME}")
 	endif()
@@ -119,6 +130,8 @@ endif()
 
 if (${PICO_BOARD} MATCHES "olimex-pico-pc")
 	pico_set_program_name(ngpc "ngpc emulator by xrip for Olimex RP2040-PICO-PC")
+elseif (${PICO_BOARD} MATCHES "waveshare_rp2350_pizero")
+	pico_set_program_name(ngpc "ngpc emulator by xrip for Waveshare RP2350-PiZero")
 else()
 	pico_set_program_name(ngpc "ngpc emulator by xrip for MURMULATOR devboard")
 endif()
