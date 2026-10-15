@@ -27,6 +27,20 @@
 
 #include "audio.h"
 
+/* I2S pins: DIN, then BCK and LRCK = BCK + 1. The board header may set them. */
+#ifndef AUDIO_DATA_PIN
+#define AUDIO_DATA_PIN 26
+#endif
+#ifndef AUDIO_CLOCK_PIN
+#define AUDIO_CLOCK_PIN 27
+#endif
+
+#include "hardware/irq.h"
+#include "hardware/sync.h"
+
+static i2s_config_t *volatile i2s_irq_config = NULL;
+static void i2s_dma_irq_handler(void);
+
 #ifdef AUDIO_PWM_PIN
 #include "hardware/pwm.h"
 #include "hardware/clocks.h"
@@ -39,8 +53,8 @@ i2s_config_t i2s_get_default_config(void) {
     i2s_config_t i2s_config = {
 		.sample_freq = 44100, 
 		.channel_count = 2,
-		.data_pin = 26,
-		.clock_pin_base = 27,
+		.data_pin = AUDIO_DATA_PIN,
+		.clock_pin_base = AUDIO_CLOCK_PIN,
 		.pio = pio1,
 		.sm = 0,
         .dma_channel = 0,
@@ -90,6 +104,15 @@ void i2s_init(i2s_config_t *i2s_config) {
 #endif
     /* Allocate memory for the DMA buffer */
     i2s_config->dma_buf=malloc(i2s_config->dma_trans_count*sizeof(uint32_t));
+    for (unsigned i = 0; i < I2S_RING_BLOCKS; ++i)
+        i2s_config->dma_ring[i] = malloc(i2s_config->dma_trans_count * sizeof(uint32_t));
+    i2s_config->hold_buf = malloc(i2s_config->dma_trans_count * sizeof(uint32_t));
+#ifdef AUDIO_PWM_PIN
+    i2s_config->hold_l = i2s_config->hold_r = (65536 / 2) >> 4;   /* PWM mid level */
+#else
+    i2s_config->hold_l = i2s_config->hold_r = 0;
+#endif
+    i2s_config->ring_head = i2s_config->ring_tail = 0;
 
     /* Direct Memory Access setup */
     i2s_config->dma_channel = dma_claim_unused_channel(true);
@@ -100,7 +123,7 @@ void i2s_init(i2s_config_t *i2s_config) {
 
     channel_config_set_transfer_data_size(&dma_config, DMA_SIZE_32);
 
-    uint32_t* addr_write_DMA=&(i2s_config->pio->txf[i2s_config->sm]);
+    volatile uint32_t* addr_write_DMA=&(i2s_config->pio->txf[i2s_config->sm]);
 #ifdef AUDIO_PWM_PIN
     gpio_set_function(PWM_PIN0, GPIO_FUNC_PWM);
     gpio_set_function(PWM_PIN1, GPIO_FUNC_PWM);
@@ -134,6 +157,15 @@ void i2s_init(i2s_config_t *i2s_config) {
     );
 
     pio_sm_set_enabled(i2s_config->pio, i2s_config->sm , true);
+
+    /* Keep the DMA running from now on: each completed block immediately
+       starts the next one (or hold_buf) from the DMA_IRQ_1 handler. */
+    i2s_irq_config = i2s_config;
+    dma_channel_acknowledge_irq1(i2s_config->dma_channel);
+    dma_channel_set_irq1_enabled(i2s_config->dma_channel, true);
+    irq_add_shared_handler(DMA_IRQ_1, i2s_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
+    irq_set_enabled(DMA_IRQ_1, true);
+    i2s_dma_pump(i2s_config);
 }
 
 /**
@@ -155,33 +187,77 @@ void i2s_write(const i2s_config_t *i2s_config,const int16_t *samples,const size_
  * i2s_config: I2S context obtained by i2s_get_default_config()
  *     sample: pointer to an array of dma_trans_count x 32 bits samples
  */
-void i2s_dma_write(i2s_config_t *i2s_config,const int16_t *samples) {
-    /* Wait the completion of the previous DMA transfer */
-    dma_channel_wait_for_finish_blocking(i2s_config->dma_channel);
-    /* Copy samples into the DMA buffer */
-
-#ifdef AUDIO_PWM_PIN
-    for(uint16_t i=0;i<i2s_config->dma_trans_count*2;i++) {
-           
-            i2s_config->dma_buf[i] = (65536/2+(samples[i]))>>(4+i2s_config->volume);
-
-        }
-#else
-
-    if(i2s_config->volume==0) {
-        memcpy(i2s_config->dma_buf,samples,i2s_config->dma_trans_count*sizeof(int32_t));
+/**
+ * Start the next DMA block: the oldest ring block, or on underrun hold_buf
+ * at the last output level.  Runs from the DMA completion interrupt, so the
+ * I2S clocks never stop between blocks.  When the DMA was restarted only by
+ * polling, the PIO stalled with BCK/LRCK frozen until the next poll and the
+ * TDA1387 output sagged toward zero during each stall: crackling.
+ */
+static void __not_in_flash_func(i2s_dma_start_next)(i2s_config_t *i2s_config) {
+    uint16_t *blk;
+    const uint16_t n = i2s_config->dma_trans_count;
+    const uint8_t tail = i2s_config->ring_tail;
+    if (tail != i2s_config->ring_head) {
+        blk = i2s_config->dma_ring[tail];
+        i2s_config->hold_l = blk[(n - 1) * 2 + 0];
+        i2s_config->hold_r = blk[(n - 1) * 2 + 1];
+        i2s_config->ring_tail = (uint8_t)((tail + 1u) % I2S_RING_BLOCKS);
     } else {
-        for(uint16_t i=0;i<i2s_config->dma_trans_count*2;i++) {
-            i2s_config->dma_buf[i] = samples[i]>>i2s_config->volume;
+        blk = i2s_config->hold_buf;
+        for (uint16_t i = 0; i < n; ++i) {
+            blk[i * 2 + 0] = i2s_config->hold_l;
+            blk[i * 2 + 1] = i2s_config->hold_r;
         }
     }
-#endif    
+    dma_channel_transfer_from_buffer_now(i2s_config->dma_channel, blk, n);
+}
 
+static void __isr __not_in_flash_func(i2s_dma_irq_handler)(void) {
+    i2s_config_t *i2s_config = i2s_irq_config;
+    if (!i2s_config || !dma_channel_get_irq1_status(i2s_config->dma_channel))
+        return;
+    dma_channel_acknowledge_irq1(i2s_config->dma_channel);
+    i2s_dma_start_next(i2s_config);
+}
 
-    /* Initiate the DMA transfer */
-    dma_channel_transfer_from_buffer_now(i2s_config->dma_channel,
-                                         i2s_config->dma_buf,
-                                         i2s_config->dma_trans_count);
+/**
+ * Kick the DMA if it is idle (only before the first block; afterwards the
+ * DMA interrupt keeps it running).  Safe to call often from core0.
+ */
+void __not_in_flash_func(i2s_dma_pump)(i2s_config_t *i2s_config) {
+    if (dma_channel_is_busy(i2s_config->dma_channel)) return;
+    const uint32_t ints = save_and_disable_interrupts();
+    if (!dma_channel_is_busy(i2s_config->dma_channel) &&
+        !dma_channel_get_irq1_status(i2s_config->dma_channel))
+        i2s_dma_start_next(i2s_config);
+    restore_interrupts(ints);
+}
+
+/**
+ * Queue one block of dma_trans_count stereo samples (non blocking).
+ * If the ring is full the block is dropped.
+ */
+void i2s_dma_write(i2s_config_t *i2s_config,const int16_t *samples) {
+    const uint8_t head = i2s_config->ring_head;
+    const uint8_t next = (uint8_t)((head + 1u) % I2S_RING_BLOCKS);
+    if (next == i2s_config->ring_tail)
+        return;                                   /* ring full: drop the block */
+
+    uint16_t *dst = i2s_config->dma_ring[head];
+#ifdef AUDIO_PWM_PIN
+    for (uint16_t i = 0; i < i2s_config->dma_trans_count * 2; i++)
+        dst[i] = (uint16_t)((65536 / 2 + samples[i]) >> (4 + i2s_config->volume));
+#else
+    if (i2s_config->volume == 0)
+        memcpy(dst, samples, i2s_config->dma_trans_count * sizeof(int32_t));
+    else
+        for (uint16_t i = 0; i < i2s_config->dma_trans_count * 2; i++)
+            dst[i] = samples[i] >> i2s_config->volume;
+#endif
+
+    __dmb();                                      /* block data before the index */
+    i2s_config->ring_head = next;
 }
 
 /**

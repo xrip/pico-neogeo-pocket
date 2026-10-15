@@ -1,17 +1,49 @@
+# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
+if(WIN32)
+    set(USERHOME $ENV{USERPROFILE})
+else()
+    set(USERHOME $ENV{HOME})
+endif()
+set(sdkVersion 2.2.0)
+set(toolchainVersion 14_2_Rel1)
+set(picotoolVersion 2.2.0)
+set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
+if (EXISTS ${picoVscode})
+    include(${picoVscode})
+endif()
+# ====================================================================================
+set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards)
+
+# Chip: rp2040 (Pico) or rp2350 (Pico 2)
+#set(PICO_PLATFORM "rp2040" CACHE STRING "Chip type")
+set(PICO_PLATFORM "rp2350" CACHE STRING "Chip type")
+
+# Board: murmulator (MURMULATOR 1.x), murmulator2 (MURMULATOR 2.0),
+# olimex-pico-pc (Olimex RP2040-PICO-PC) or waveshare_rp2350_pizero
+#set(PICO_BOARD "murmulator" CACHE STRING "Board type")
+#set(PICO_BOARD "olimex-pico-pc" CACHE STRING "Board type")
+#set(PICO_BOARD "waveshare_rp2350_pizero" CACHE STRING "Board type")
+set(PICO_BOARD "murmulator2" CACHE STRING "Board type")
+
 cmake_minimum_required(VERSION 3.13)
 include(pico_sdk_import.cmake)
 
 project(ngpc C CXX ASM)
 SET(BUILD_NAME "${PROJECT_NAME}")
 
-option(I2S "Enable I2S sound" OFF)
+option(I2S "Enable I2S sound" ON)
 option(I2S_CS4334 "Enable I2S CS4334 sound" OFF)
 option(VGA "Enable VGA" OFF)
 option(TFT "Enable TFT display" OFF)
 option(ILI9341 "Enable TFT ILI9341 display" OFF)
-option(HDMI "Enable HDMI display" OFF)
+option(HDMI "Enable HDMI display" ON)
 option(TV "Enable TV composite output" OFF)
 option(SOFTTV "Enable TV soft composite output" OFF)
+
+if (${PICO_BOARD} MATCHES "waveshare_rp2350_pizero")
+	# Waveshare RP2350-PiZero (z0p2): RP2350B, 16 MB flash, HDMI on GPIO32..39
+	set(HDMI ON CACHE BOOL "Enable HDMI display" FORCE)
+endif()
 
 
 set(CMAKE_C_STANDARD 11)
@@ -53,15 +85,57 @@ message(STATUS "")
 
 add_executable(${PROJECT_NAME} ${SRC})
 
-pico_define_boot_stage2(slower_boot2 ${PICO_DEFAULT_BOOT_STAGE2_FILE})
-target_compile_definitions(slower_boot2 PRIVATE PICO_FLASH_SPI_CLKDIV=4)
-pico_set_boot_stage2(${PROJECT_NAME} slower_boot2)
+if (${PICO_PLATFORM} MATCHES "rp2040")
+	pico_define_boot_stage2(slower_boot2 ${PICO_DEFAULT_BOOT_STAGE2_FILE})
+	target_compile_definitions(slower_boot2 PRIVATE PICO_FLASH_SPI_CLKDIV=4)
+	pico_set_boot_stage2(${PROJECT_NAME} slower_boot2)
+	if (${PICO_BOARD} MATCHES "olimex-pico-pc")
+		SET(BUILD_NAME "PCp1-${PROJECT_NAME}")
+	else()
+		SET(BUILD_NAME "m1p1-${PROJECT_NAME}")
+	endif()
+else()
+	if (${PICO_BOARD} MATCHES "olimex-pico-pc")
+		SET(BUILD_NAME "PCp2-${PROJECT_NAME}")
+	elseif (${PICO_BOARD} MATCHES "waveshare_rp2350_pizero")
+		SET(BUILD_NAME "z0p2-${PROJECT_NAME}")
+	elseif (${PICO_BOARD} MATCHES "murmulator2")
+		SET(BUILD_NAME "m2p2-${PROJECT_NAME}")
+	else()
+		SET(BUILD_NAME "m1p2-${PROJECT_NAME}")
+	endif()
+endif()
 
+# RP2350: run the NeoPop core (TLCS-900h, Z80, memory, graphics, sound) from
+# SRAM instead of XIP flash.  The cartridge itself is read through XIP, and
+# code fetches competing with it for the 16 KB XIP cache made the emulation
+# too slow.  The SDK linker script already keeps libgcc/libm in RAM through
+# EXCLUDE_FILE lists; neopop objects are added to them, so their .text and
+# .rodata fall through to the RAM-resident .data section.
+if (${PICO_PLATFORM} MATCHES "rp2350")
+	# The pattern must match object names on every host: Windows builds give
+	# "CMakeFiles\ngpc.dir\src\neopop\mem.c.obj", Linux ".../src/neopop/mem.c.o".
+	file(READ ${PICO_SDK_PATH}/src/rp2_common/pico_crt0/rp2350/memmap_default.ld NGPC_LDS)
+	set(NGPC_LDS_EXCLUDE "EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a:)")
+	string(FIND "${NGPC_LDS}" "${NGPC_LDS_EXCLUDE}" NGPC_LDS_POS)
+	if (NGPC_LDS_POS EQUAL -1)
+		message(FATAL_ERROR "memmap_default.ld of this pico-sdk has no '${NGPC_LDS_EXCLUDE}': cannot move the NeoPop core to RAM")
+	endif()
+	string(REPLACE "${NGPC_LDS_EXCLUDE}"
+	               "EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *neopop*)"
+	               NGPC_LDS "${NGPC_LDS}")
+	file(WRITE ${CMAKE_BINARY_DIR}/memmap_ngpc.ld "${NGPC_LDS}")
+	message(STATUS "NeoPop core runs from RAM: ${CMAKE_BINARY_DIR}/memmap_ngpc.ld")
+	pico_set_linker_script(${PROJECT_NAME} ${CMAKE_BINARY_DIR}/memmap_ngpc.ld)
+endif()
 
-set(FAMILY rp2040)
-set(BOARD pico_sdk)
-
-pico_set_program_name(ngpc "ngpc emulator by xrip for MURMULATOR devboard")
+if (${PICO_BOARD} MATCHES "olimex-pico-pc")
+	pico_set_program_name(ngpc "ngpc emulator by xrip for Olimex RP2040-PICO-PC")
+elseif (${PICO_BOARD} MATCHES "waveshare_rp2350_pizero")
+	pico_set_program_name(ngpc "ngpc emulator by xrip for Waveshare RP2350-PiZero")
+else()
+	pico_set_program_name(ngpc "ngpc emulator by xrip for MURMULATOR devboard")
+endif()
 pico_set_program_version(ngpc "develop")
 
 target_include_directories(${PROJECT_NAME} PRIVATE src src/neopop)
@@ -96,7 +170,13 @@ ELSE()
 ENDIF()
 
 IF(NOT I2S)
-	target_compile_definitions(${PROJECT_NAME} PRIVATE AUDIO_PWM_PIN=26)
+	if (${PICO_BOARD} MATCHES "murmulator2")
+		# PWM on GP10/GP11 (one PWM slice)
+		target_compile_definitions(${PROJECT_NAME} PRIVATE AUDIO_PWM_PIN=10)
+		SET(BUILD_NAME "${BUILD_NAME}-PWM")
+	else()
+		target_compile_definitions(${PROJECT_NAME} PRIVATE AUDIO_PWM_PIN=26)
+	endif()
 ELSEIF(I2S_CS4334)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE I2S_CS4334)
 	SET(BUILD_NAME "${BUILD_NAME}-I2S-CS4334")
@@ -130,38 +210,10 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 		tinyusb_host tinyusb_board
 )
 
+# Pins and flash size come from boards/${PICO_BOARD}.h
 target_compile_definitions(${PROJECT_NAME} PRIVATE
-		PICO_FLASH_SIZE_BYTES=16777216
-		# SDCARD
-		SDCARD_PIN_SPI0_CS=5
-		SDCARD_PIN_SPI0_SCK=2
-		SDCARD_PIN_SPI0_MOSI=3
-		SDCARD_PIN_SPI0_MISO=4
-
-		# PS2KBD
 		USE_PS2_KBD
-		PS2KBD_GPIO_FIRST=0
-
-		# NES Gamepad
 		USE_NESPAD
-		NES_GPIO_CLK=14
-		NES_GPIO_DATA=16
-		NES_GPIO_LAT=15
-
-		# VGA 8 pins starts from pin:
-		VGA_BASE_PIN=6
-
-		# HDMI 8 pins starts from pin:
-		HDMI_BASE_PIN=6
-
-		# TFT
-		TFT_CS_PIN=6
-		TFT_RST_PIN=8
-		TFT_LED_PIN=9
-		TFT_DC_PIN=10
-		TFT_DATA_PIN=12
-		TFT_CLK_PIN=13
-
 		SMS_SINGLE_FILE=1
 )
 pico_enable_stdio_usb(${PROJECT_NAME} 0)

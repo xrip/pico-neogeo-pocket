@@ -46,6 +46,18 @@ typedef struct i2s_config
     uint16_t dma_trans_count;
     uint16_t *dma_buf;
     uint8_t volume;
+    /* Non-blocking output: a small ring of finished blocks of dma_trans_count
+       stereo samples.  The DMA completion interrupt (DMA_IRQ_1, core0) starts
+       the next block at once, so the I2S clocks never stop between blocks;
+       i2s_dma_write() (core0) only moves ring_head, the interrupt only
+       ring_tail. */
+#define I2S_RING_BLOCKS 4
+    uint16_t *dma_ring[I2S_RING_BLOCKS];
+    uint16_t *hold_buf;      /* played on underrun: holds the last level, no click */
+    uint16_t  hold_l;
+    uint16_t  hold_r;
+    volatile uint8_t ring_head;
+    volatile uint8_t ring_tail;
 } i2s_config_t;
 
 
@@ -53,6 +65,7 @@ i2s_config_t i2s_get_default_config(void);
 void i2s_init(i2s_config_t *i2s_config);
 void i2s_write(const i2s_config_t *i2s_config,const int16_t *samples,const size_t len);
 void i2s_dma_write(i2s_config_t *i2s_config,const int16_t *samples);
+void i2s_dma_pump(i2s_config_t *i2s_config);
 void i2s_volume(i2s_config_t *i2s_config,uint8_t volume);
 void i2s_increase_volume(i2s_config_t *i2s_config);
 void i2s_decrease_volume(i2s_config_t *i2s_config);

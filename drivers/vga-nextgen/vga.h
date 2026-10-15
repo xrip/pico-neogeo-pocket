@@ -1,4 +1,5 @@
 #pragma once
+#include "pico.h" // board header: pin defaults below must not override it
 #include "stdbool.h"
 
 #define PIO_VGA (pio0)

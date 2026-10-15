@@ -1,5 +1,6 @@
 #ifndef _SDCARD_H_
 #define _SDCARD_H_
+#include "pico.h" // board header: pin defaults below must not override it
 
 /* SPI pin assignment */
 

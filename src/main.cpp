@@ -1,7 +1,14 @@
 #include <cstdio>
 #include <cstring>
+#include <pico.h>
 #include <hardware/flash.h>
+#include <hardware/vreg.h>
+#if PICO_RP2350
+#include <hardware/structs/qmi.h>
+#else
 #include <hardware/structs/vreg_and_chip_reset.h>
+#endif
+#include <hardware/watchdog.h>
 #include <pico/multicore.h>
 #include <pico/stdlib.h>
 
@@ -24,8 +31,11 @@ static const uintptr_t romdata = XIP_BASE + FLASH_TARGET_OFFSET;
 extern uint16_t cfb[256*256];
 uint8_t * SCREEN = (uint8_t *)cfb;
 
-#define AUDIO_SAMPLE_RATE SV_SAMPLE_RATE
-#define AUDIO_BUFFER_SIZE ((SV_SAMPLE_RATE / 60) << 1)
+/* Sound: NeoPop's two SN76489-style chips + 8-bit DAC, mixed once per
+   emulated frame in system_VBL() */
+#define AUDIO_FREQ 22050
+#define AUDIO_SAMPLES_PER_FRAME_MAX (AUDIO_FREQ / 60 + 1)
+#define AUDIO_BLOCK 256          /* stereo samples per DMA block (~11.6 ms) */
 
 char __uninitialized_ram(filename[256]);
 static uint32_t __uninitialized_ram(rom_size) = 0;
@@ -42,14 +52,20 @@ typedef struct __attribute__((__packed__)) {
     uint8_t ghosting;
     uint8_t palette;
     uint8_t save_slot;
+    uint8_t audio_volume;   // 0 = mute, 1..4 = 25%, 50%, 100%, 200%
+    uint8_t audio_rate;     // 0 = 22 kHz, 1 = 11 kHz (sound emulated at half rate)
+    uint8_t frame_skip;     // 0 = auto, 1..4 = draw 1 of 1..4 frames
 } SETTINGS;
 
 SETTINGS settings = {
-        .version = 1,
+        .version = 2,
         .swap_ab = false,
         .aspect_ratio = false,
         .ghosting = 8,
         .save_slot = 0,
+        .audio_volume = 3,
+        .audio_rate = 0,
+        .frame_skip = 0,
 };
 
 struct input_bits_t {
@@ -67,28 +83,26 @@ static input_bits_t keyboard_bits = { false, false, false, false, false, false, 
 static input_bits_t gamepad1_bits = { false, false, false, false, false, false, false, false };
 static input_bits_t gamepad2_bits = { false, false, false, false, false, false, false, false };
 
-bool swap_ab = false;
-
 void nespad_tick() {
     nespad_read();
 
     uint8_t controls_state = 0;
 
     if (settings.swap_ab) {
-        gamepad1_bits.b = (nespad_state & DPAD_A) != 0;
-        gamepad1_bits.a = (nespad_state & DPAD_B) != 0;
+        gamepad1_bits.b = keyboard_bits.a || (nespad_state & DPAD_A) != 0;
+        gamepad1_bits.a = keyboard_bits.b || (nespad_state & DPAD_B) != 0;
     } else {
-        gamepad1_bits.a = (nespad_state & DPAD_A) != 0;
-        gamepad1_bits.b = (nespad_state & DPAD_B) != 0;
+        gamepad1_bits.a = keyboard_bits.a || (nespad_state & DPAD_A) != 0;
+        gamepad1_bits.b = keyboard_bits.b || (nespad_state & DPAD_B) != 0;
 
     }
 
-    gamepad1_bits.select = (nespad_state & DPAD_SELECT) != 0;
-    gamepad1_bits.start = (nespad_state & DPAD_START) != 0;
-    gamepad1_bits.up = (nespad_state & DPAD_UP) != 0;
-    gamepad1_bits.down = (nespad_state & DPAD_DOWN) != 0;
-    gamepad1_bits.left = (nespad_state & DPAD_LEFT) != 0;
-    gamepad1_bits.right = (nespad_state & DPAD_RIGHT) != 0;
+    gamepad1_bits.select = keyboard_bits.select || (nespad_state & DPAD_SELECT) != 0;
+    gamepad1_bits.start = keyboard_bits.start || (nespad_state & DPAD_START) != 0;
+    gamepad1_bits.up = keyboard_bits.up || (nespad_state & DPAD_UP) != 0;
+    gamepad1_bits.down = keyboard_bits.down || (nespad_state & DPAD_DOWN) != 0;
+    gamepad1_bits.left = keyboard_bits.left || (nespad_state & DPAD_LEFT) != 0;
+    gamepad1_bits.right = keyboard_bits.right || (nespad_state & DPAD_RIGHT) != 0;
 
 
     if (gamepad1_bits.up || keyboard_bits.up ) controls_state|=0x08;
@@ -112,6 +126,10 @@ static bool isInReport(hid_keyboard_report_t const* report, const unsigned char 
     return false;
 }
 
+volatile bool altPressed = false;
+volatile bool ctrlPressed = false;
+volatile uint8_t fxPressedV = 0;
+
 void
 __not_in_flash_func(process_kbd_report)(hid_keyboard_report_t const* report, hid_keyboard_report_t const* prev_report) {
     /* printf("HID key report modifiers %2.2X report ", report->modifier);
@@ -119,22 +137,55 @@ __not_in_flash_func(process_kbd_report)(hid_keyboard_report_t const* report, hid
         printf("%2.2X", i);
     printf("\r\n");
      */
-    keyboard_bits.start = isInReport(report, HID_KEY_ENTER);
-    keyboard_bits.select = isInReport(report, HID_KEY_BACKSPACE) || isInReport(report, HID_KEY_ESCAPE);
+    keyboard_bits.start = isInReport(report, HID_KEY_ENTER) || isInReport(report, HID_KEY_KEYPAD_ENTER);
+    keyboard_bits.select = isInReport(report, HID_KEY_BACKSPACE) || isInReport(report, HID_KEY_ESCAPE) || isInReport(report, HID_KEY_KEYPAD_ADD);
+    keyboard_bits.a = isInReport(report, HID_KEY_Z) || isInReport(report, HID_KEY_O) || isInReport(report, HID_KEY_KEYPAD_0);
+    keyboard_bits.b = isInReport(report, HID_KEY_X) || isInReport(report, HID_KEY_P) || isInReport(report, HID_KEY_KEYPAD_DECIMAL);
 
-    keyboard_bits.a = isInReport(report, HID_KEY_Z) || isInReport(report, HID_KEY_O);
-    keyboard_bits.b = isInReport(report, HID_KEY_X) || isInReport(report, HID_KEY_P);
+    bool b7 = isInReport(report, HID_KEY_KEYPAD_7);
+    bool b9 = isInReport(report, HID_KEY_KEYPAD_9);
+    bool b1 = isInReport(report, HID_KEY_KEYPAD_1);
+    bool b3 = isInReport(report, HID_KEY_KEYPAD_3);
 
-    keyboard_bits.up = isInReport(report, HID_KEY_ARROW_UP) || isInReport(report, HID_KEY_W);
-    keyboard_bits.down = isInReport(report, HID_KEY_ARROW_DOWN) || isInReport(report, HID_KEY_S);
-    keyboard_bits.left = isInReport(report, HID_KEY_ARROW_LEFT) || isInReport(report, HID_KEY_A);
-    keyboard_bits.right = isInReport(report, HID_KEY_ARROW_RIGHT)  || isInReport(report, HID_KEY_D);
+    keyboard_bits.up = b7 || b9 || isInReport(report, HID_KEY_ARROW_UP) || isInReport(report, HID_KEY_W) || isInReport(report, HID_KEY_KEYPAD_8);
+    keyboard_bits.down = b1 || b3 || isInReport(report, HID_KEY_ARROW_DOWN) || isInReport(report, HID_KEY_S) || isInReport(report, HID_KEY_KEYPAD_2) || isInReport(report, HID_KEY_KEYPAD_5);
+    keyboard_bits.left = b7 || b1 || isInReport(report, HID_KEY_ARROW_LEFT) || isInReport(report, HID_KEY_A) || isInReport(report, HID_KEY_KEYPAD_4);
+    keyboard_bits.right = b9 || b3 || isInReport(report, HID_KEY_ARROW_RIGHT)  || isInReport(report, HID_KEY_D) || isInReport(report, HID_KEY_KEYPAD_6);
+
+    /* USB keyboards report Ctrl/Alt only in the modifier byte; the PS/2
+       driver sets both the modifier byte and keycode[]. */
+    altPressed = (report->modifier & (KEYBOARD_MODIFIER_LEFTALT | KEYBOARD_MODIFIER_RIGHTALT)) ||
+                 isInReport(report, HID_KEY_ALT_LEFT) || isInReport(report, HID_KEY_ALT_RIGHT);
+    ctrlPressed = (report->modifier & (KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL)) ||
+                  isInReport(report, HID_KEY_CONTROL_LEFT) || isInReport(report, HID_KEY_CONTROL_RIGHT);
+    
+    if (altPressed && ctrlPressed && isInReport(report, HID_KEY_DELETE)) {
+        watchdog_enable(10, true);
+        while(true) {
+            tight_loop_contents();
+        }
+    }
+    if (ctrlPressed || altPressed) {
+        uint8_t fxPressed = 0;
+        if (isInReport(report, HID_KEY_F1)) fxPressed = 1;
+        else if (isInReport(report, HID_KEY_F2)) fxPressed = 2;
+        else if (isInReport(report, HID_KEY_F3)) fxPressed = 3;
+        else if (isInReport(report, HID_KEY_F4)) fxPressed = 4;
+        else if (isInReport(report, HID_KEY_F5)) fxPressed = 5;
+        else if (isInReport(report, HID_KEY_F6)) fxPressed = 6;
+        else if (isInReport(report, HID_KEY_F7)) fxPressed = 7;
+        else if (isInReport(report, HID_KEY_F8)) fxPressed = 8;
+        fxPressedV = fxPressed;
+    }
     //-------------------------------------------------------------------------
 }
 
+#ifndef PS2KBD_GPIO_FIRST
+#define PS2KBD_GPIO_FIRST 0
+#endif
 Ps2Kbd_Mrmltr ps2kbd(
     pio1,
-    0,
+    PS2KBD_GPIO_FIRST,
     process_kbd_report);
 
 
@@ -145,7 +196,12 @@ uint64_t start_time;
 
 
 i2s_config_t i2s_config;
-#define AUDIO_FREQ SV_SAMPLE_RATE
+static _u16 chip_samples[AUDIO_SAMPLES_PER_FRAME_MAX];
+static _u8 dac_samples[AUDIO_SAMPLES_PER_FRAME_MAX];
+static int16_t audio_block[AUDIO_BLOCK * 2];
+static uint16_t audio_block_fill = 0;
+static volatile bool frame_done = false;
+static uint64_t next_frame_us = 0;      // 0: restart frame pacing
 
 
 typedef struct __attribute__((__packed__)) {
@@ -191,6 +247,43 @@ bool isExecutable(const char pathname[255],const char *extensions) {
     return false;
 }
 
+#if PICO_RP2350
+/* flash_range_erase/program end with the boot-time XIP setup (QSPI clock =
+ * clk_sys / PICO_FLASH_SPI_CLKDIV = clk_sys / 2) and flush the XIP cache, so
+ * the first fetch back in flash code would run the flash far too fast at the
+ * overclocked clk_sys (z0p2: the board hangs while loading a ROM). Do the
+ * write and the restore of the QMI timing set by overclock() from RAM. */
+static void __no_inline_not_in_flash_func(flash_erase_keep_qmi)(uint32_t offs, size_t count) {
+    const uint32_t timing = qmi_hw->m[0].timing;
+    const uint32_t rfmt   = qmi_hw->m[0].rfmt;
+    const uint32_t rcmd   = qmi_hw->m[0].rcmd;
+    flash_range_erase(offs, count);
+    qmi_hw->m[0].timing = timing;
+    qmi_hw->m[0].rfmt   = rfmt;
+    qmi_hw->m[0].rcmd   = rcmd;
+    __asm volatile ("dsb; isb" ::: "memory");
+}
+
+static void __no_inline_not_in_flash_func(flash_program_keep_qmi)(uint32_t offs, const uint8_t *data, size_t count) {
+    const uint32_t timing = qmi_hw->m[0].timing;
+    const uint32_t rfmt   = qmi_hw->m[0].rfmt;
+    const uint32_t rcmd   = qmi_hw->m[0].rcmd;
+    flash_range_program(offs, data, count);
+    qmi_hw->m[0].timing = timing;
+    qmi_hw->m[0].rfmt   = rfmt;
+    qmi_hw->m[0].rcmd   = rcmd;
+    __asm volatile ("dsb; isb" ::: "memory");
+}
+#else
+static void flash_erase_keep_qmi(uint32_t offs, size_t count) {
+    flash_range_erase(offs, count);
+}
+
+static void flash_program_keep_qmi(uint32_t offs, const uint8_t *data, size_t count) {
+    flash_range_program(offs, data, count);
+}
+#endif
+
 bool filebrowser_loadfile(const char pathname[256]) {
     UINT bytes_read = 0;
     FIL file;
@@ -203,7 +296,9 @@ bool filebrowser_loadfile(const char pathname[256]) {
     FILINFO fileinfo;
     f_stat(pathname, &fileinfo);
     rom_size = fileinfo.fsize;
-    if (16384 - 64 << 10 < fileinfo.fsize) {
+    /* The top 512 KB of the flash stay untouched (pico-launcher lives in the
+       last 260 KB). */
+    if (PICO_FLASH_SIZE_BYTES - (512u << 10) - FLASH_TARGET_OFFSET < ((fileinfo.fsize + FLASH_SECTOR_SIZE - 1) & ~(FLASH_SECTOR_SIZE - 1))) {
         draw_text("ERROR: ROM too large! Canceled!!", window_x + 1, window_y + 2, 13, 1);
         sleep_ms(5000);
         return false;
@@ -217,7 +312,7 @@ bool filebrowser_loadfile(const char pathname[256]) {
     multicore_lockout_start_blocking();
     auto flash_target_offset = FLASH_TARGET_OFFSET;
     const uint32_t ints = save_and_disable_interrupts();
-    flash_range_erase(flash_target_offset, fileinfo.fsize);
+    flash_erase_keep_qmi(flash_target_offset, (fileinfo.fsize + FLASH_SECTOR_SIZE - 1) & ~(FLASH_SECTOR_SIZE - 1));
     restore_interrupts(ints);
 
     if (FR_OK == f_open(&file, pathname, FA_READ)) {
@@ -228,7 +323,7 @@ bool filebrowser_loadfile(const char pathname[256]) {
 
             if (bytes_read) {
                 const uint32_t ints = save_and_disable_interrupts();
-                flash_range_program(flash_target_offset, buffer, FLASH_PAGE_SIZE);
+                flash_program_keep_qmi(flash_target_offset, buffer, FLASH_PAGE_SIZE);
                 restore_interrupts(ints);
 
                 gpio_put(PICO_DEFAULT_LED_PIN, flash_target_offset >> 13 & 1);
@@ -263,6 +358,7 @@ void filebrowser(const char pathname[256], const char executables[11]) {
         draw_text("SD Card not inserted or SD Card error!", 0, 0, 12, 0);
         while (true);
     }
+    f_mkdir(HOME_DIR);
 
     while (true) {
         memset(fileItems, 0, sizeof(file_item_t) * max_files);
@@ -463,12 +559,44 @@ typedef struct __attribute__((__packed__)) {
     char value_list[15][10];
 } MenuItem;
 
-uint16_t frequencies[] = { 378, 396, 404, 408, 412, 416, 420, 424, 432 };
+#ifndef CPU_FREQ
+#define CPU_FREQ 378
+#endif
+#define FREQ_STR_(x) #x
+#define FREQ_STR(x) FREQ_STR_(x)
+uint16_t frequencies[] = { CPU_FREQ, 396, 404, 408, 412, 416, 420, 424, 432 };
 uint8_t frequency_index = 0;
 
-bool overclock() {
+#if PICO_RP2350
+/* RP2350 has no boot2 PICO_FLASH_SPI_CLKDIV: keep the QSPI flash clock
+   below ~88 MHz by programming the QMI divider for the new system clock. */
+static void __not_in_flash_func(flash_timings)() {
+    const int max_flash_freq = 88 * MHZ;
+    const int clock_hz = frequencies[frequency_index] * MHZ;
+    int divisor = (clock_hz + max_flash_freq - 1) / max_flash_freq;
+    if (divisor == 1 && clock_hz > 100000000) {
+        divisor = 2;
+    }
+    int rxdelay = divisor;
+    if (clock_hz / divisor > 100000000) {
+        rxdelay += 1;
+    }
+    qmi_hw->m[0].timing = 0x60007000 |
+                          rxdelay << QMI_M0_TIMING_RXDELAY_LSB |
+                          divisor << QMI_M0_TIMING_CLKDIV_LSB;
+}
+#endif
+
+bool __not_in_flash_func(overclock)() {
+#if PICO_RP2350
+    vreg_disable_voltage_limit();
+    vreg_set_voltage(VREG_VOLTAGE_1_60);
+    sleep_ms(33);
+    flash_timings();
+#else
     hw_set_bits(&vreg_and_chip_reset_hw->vreg, VREG_AND_CHIP_RESET_VREG_VSEL_BITS);
     sleep_ms(10);
+#endif
     return set_sys_clock_khz(frequencies[frequency_index] * KHZ, true);
 }
 
@@ -547,6 +675,7 @@ void save_config() {
         f_close(&file);
     }
 }
+
 #if SOFTTV
 typedef struct tv_out_mode_t {
     // double color_freq;
@@ -576,6 +705,10 @@ const MenuItem menu_items[] = {
         {"Swap AB <> BA: %s",     ARRAY, &settings.swap_ab,  nullptr, 1, {"NO ",       "YES"}},
         {},
         { "Ghosting pix: %i ", INT, &settings.ghosting, nullptr, 8 },
+        {},
+        { "Volume: %s", ARRAY, &settings.audio_volume, nullptr, 4, { "Mute", "25% ", "50% ", "100%", "200%" } },
+        { "Emulate sound: %s", ARRAY, &settings.audio_rate, nullptr, 1, { "22 kHz", "11 kHz" } },
+        { "Frame skip: %s", ARRAY, &settings.frame_skip, nullptr, 4, { "Auto ", "Off  ", "1 / 2", "1 / 3", "1 / 4" } },
 #if VGA
         { "Keep aspect ratio: %s",     ARRAY, &settings.aspect_ratio,  nullptr, 1, {"NO ",       "YES"}},
 #endif
@@ -596,7 +729,7 @@ const MenuItem menu_items[] = {
 {},
 {
     "Overclocking: %s MHz", ARRAY, &frequency_index, &overclock, count_of(frequencies) - 1,
-    { "378", "396", "404", "408", "412", "416", "420", "424", "432" }
+    { FREQ_STR(CPU_FREQ), "396", "404", "408", "412", "416", "420", "424", "432" }
 },
 { "Press START / Enter to apply", NONE },
     { "Reset to ROM select", ROM_SELECT },
@@ -706,6 +839,7 @@ void menu() {
 void __time_critical_func(render_core)() {
     multicore_lockout_victim_init();
 
+    tuh_init(BOARD_TUH_RHPORT);
     ps2kbd.init_gpio();
     nespad_begin(clock_get_hz(clk_sys) / 1000, NES_GPIO_CLK, NES_GPIO_DATA, NES_GPIO_LAT);
 
@@ -739,8 +873,7 @@ void __time_critical_func(render_core)() {
 
         tick = time_us_64();
 
-        // tuh_task();
-        // hid_app_task();
+        tuh_task();
         tight_loop_contents();
     }
 
@@ -750,6 +883,76 @@ void __time_critical_func(render_core)() {
 int frame, frame_cnt = 0;
 int frame_timer_start = 0;
 uint8_t system_frameskip_key = 1;
+
+/* One emulated frame of sound: AUDIO_FREQ/60 output samples (367/368).
+   With audio_rate = 1 the chips are emulated at 11025 Hz and every sample
+   is output twice.  The mono mix goes through a DC blocker (the chip output
+   is unipolar), gets the volume gain and is queued in AUDIO_BLOCK blocks. */
+static void ngpc_audio_frame() {
+    static uint32_t frac = 0;
+    static uint8_t rate_shift = 0;
+    static uint8_t phase = 0;
+    static int x_prev = 0, y_prev = 0;
+    static const uint8_t gain[] = { 0, 1, 2, 4, 8 };   // x/4
+
+    const uint8_t want_shift = settings.audio_rate ? 1 : 0;
+    if (want_shift != rate_shift) {
+        rate_shift = want_shift;
+        sound_set_rate(AUDIO_FREQ >> rate_shift);
+    }
+
+    frac += AUDIO_FREQ;
+    const int n = (int)(frac / 60);
+    frac %= 60;
+
+    int g = n;
+    if (rate_shift) g = (n + ((phase & 1) == 0 ? 1 : 0)) >> 1;
+    sound_update(chip_samples, g * 2);
+    dac_update(dac_samples, n);           // the DAC FIFO is always read at the output rate
+
+    const int vol = settings.audio_volume <= 4 ? gain[settings.audio_volume] : 4;
+    int k = 0;
+    for (int i = 0; i < n; i++) {
+        if (!rate_shift || (phase & 1) == 0) {
+            const int x = (int)chip_samples[k] + (((int)dac_samples[i] - 0x80) << 7);
+            y_prev = x - x_prev + ((y_prev * 255) >> 8);
+            x_prev = x;
+            k++;
+        }
+        phase++;
+        int out = (y_prev * vol) >> 2;
+        if (out > 32767) out = 32767;
+        if (out < -32768) out = -32768;
+        audio_block[audio_block_fill * 2] = audio_block[audio_block_fill * 2 + 1] = (int16_t)out;
+        if (++audio_block_fill == AUDIO_BLOCK) {
+            i2s_dma_write(&i2s_config, audio_block);
+            audio_block_fill = 0;
+        }
+    }
+}
+
+/* Called after every emulated frame: wait for the 60 Hz slot while feeding
+   the audio DMA; when late, draw fewer frames (Auto) or use the fixed skip. */
+static void pace_frame() {
+    const uint64_t now = time_us_64();
+    if (next_frame_us == 0 || now > next_frame_us + 100000)
+        next_frame_us = now;              // (re)start, or too far behind to catch up
+    next_frame_us += 16667;
+
+    const bool behind = now >= next_frame_us;
+    while (time_us_64() < next_frame_us)
+        i2s_dma_pump(&i2s_config);
+
+    if (settings.frame_skip == 0) {
+        if (behind) {
+            if (system_frameskip_key < 4) system_frameskip_key++;
+        } else if (system_frameskip_key > 1) {
+            system_frameskip_key--;
+        }
+    } else {
+        system_frameskip_key = settings.frame_skip;
+    }
+}
 extern "C" {
 void system_message(char *vaMessage, ...) {
 /*    va_list vl;
@@ -760,7 +963,7 @@ void system_message(char *vaMessage, ...) {
     printf("\n");*/
 }
 
-void system_sound_chipreset(void) {}
+void system_sound_chipreset(void) { sound_init(AUDIO_FREQ); }
 void system_sound_silence(void) {}
 BOOL system_comms_read(_u8* buffer) { return false; }
 BOOL system_comms_poll(_u8* buffer) { return false; }
@@ -786,6 +989,9 @@ void system_VBL(void) {
     if (gamepad1_bits.start || keyboard_bits.start) buttons |= 0x40;
     ram[0x6F82] = buttons;
     // frame drawn
+
+    ngpc_audio_frame();
+    frame_done = true;    // main loop paces the frame and picks the frame skip
 }
 
 BOOL system_io_state_read(char* filename, _u8* buffer, _u32 bufferLength) {
@@ -828,7 +1034,7 @@ char *
 system_get_string(STRINGS string_id)
 {
     if (string_id >= STRINGS_MAX)
-        return "Unknown String";
+        return (char*)"Unknown String";
 
     return string_tags[string_id].string;
 }
@@ -851,11 +1057,18 @@ int main() {
         gpio_put(PICO_DEFAULT_LED_PIN, false);
     }
 
-//    load_config();
+    load_config();
 
     system_colour = COLOURMODE_AUTO;
     language_english = true;
-    mute = true;
+    mute = false;
+
+    sound_init(AUDIO_FREQ);
+    i2s_config = i2s_get_default_config();
+    i2s_config.sample_freq = AUDIO_FREQ;
+    i2s_config.dma_trans_count = AUDIO_BLOCK;
+    i2s_volume(&i2s_config, 0);
+    i2s_init(&i2s_config);
 
     bios_install();
 
@@ -869,13 +1082,22 @@ int main() {
         rom_loaded();
         reset();
         start_time = time_us_64();
+        next_frame_us = 0;
 
+        uint32_t pump_counter = 0;
         while (!reboot) {
             // for(int x = 0; x <64; x++) graphics_set_palette(x, RGB888(bitmap.pal.color[x][0], bitmap.pal.color[x][1], bitmap.pal.color[x][2]));
             emulate();
+            if ((++pump_counter & 1023) == 0)
+                i2s_dma_pump(&i2s_config);   // keep the audio DMA fed while emulating
+            if (frame_done) {
+                frame_done = false;
+                pace_frame();
+            }
             //printf("\remulate");
             if ((gamepad1_bits.start && gamepad1_bits.select) || (keyboard_bits.start && keyboard_bits.select)) {
                 menu();
+                next_frame_us = 0;
             }
 
 

@@ -1,4 +1,5 @@
 #pragma once
+#include "pico.h" // board header: pin defaults below must not override it
 
 
 #ifndef TFT_RST_PIN

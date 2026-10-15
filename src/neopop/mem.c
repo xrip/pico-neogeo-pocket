@@ -182,7 +182,7 @@ static inline void* translate_address_read(_u32 address)
 
 	//BIOS Access?
 	if ((address & 0xFF0000) == 0xFF0000)
-		return bios + (address & 0xFFFF); // BIOS ROM
+		return (void*)(bios + (address & 0xFFFF)); // BIOS ROM
 
 	// ===================================
 

@@ -341,6 +341,9 @@ RomHeader;
 
 	void sound_init(int SampleRate);
 
+	/*! Change the sample rate without resetting the sound chips */
+	void sound_set_rate(int SampleRate);
+
 		//=========================================
 
 /*! Callback for "sound_init" with the system sound frequency */

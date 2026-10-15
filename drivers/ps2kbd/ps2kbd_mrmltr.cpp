@@ -9,7 +9,15 @@
 // https://wiki.osdev.org/PS/2_Keyboard
 //
 #include "ps2kbd_mrmltr.h"
+/* The PIO program waits on an absolute GPIO for the PS/2 clock:
+   GPIO0 (ps2kbd_mrmltr.pio) or GPIO2 (ps2kbd_mrmltr2.pio, z0p2). */
+#if defined(PS2KBD_GPIO_FIRST) && PS2KBD_GPIO_FIRST == 2
+#include "ps2kbd_mrmltr2.pio.h"
+#define ps2kbd_program m2ps2kbd_program
+#define ps2kbd_program_get_default_config m2ps2kbd_program_get_default_config
+#else
 #include "ps2kbd_mrmltr.pio.h"
+#endif
 #include "hardware/clocks.h"
 
 #ifdef DEBUG_PS2

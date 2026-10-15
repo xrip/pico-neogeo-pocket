@@ -436,6 +436,27 @@ void dac_update(_u8* dac_buffer, int length_bytes)
 
 //=============================================================================
 
+//Change the output sample rate keeping the current chip state: periods and
+//counters scale with UpdateStep.
+void sound_set_rate(int SampleRate)
+{
+	int i;
+	const _u32 old_step = UpdateStep;
+	const _u32 new_step = (_u32)(((double)STEP * SampleRate * 16) / SOUNDCHIPCLOCK);
+
+	if (old_step == 0 || new_step == old_step) { UpdateStep = new_step; return; }
+	UpdateStep = new_step;
+	for (i = 0; i < 4; i++)
+	{
+		toneChip.Period[i]  = (int)(((long long)toneChip.Period[i]  * new_step) / old_step);
+		toneChip.Count[i]   = (int)(((long long)toneChip.Count[i]   * new_step) / old_step);
+		noiseChip.Period[i] = (int)(((long long)noiseChip.Period[i] * new_step) / old_step);
+		noiseChip.Count[i]  = (int)(((long long)noiseChip.Count[i]  * new_step) / old_step);
+		if (toneChip.Period[i] <= 0)  toneChip.Period[i]  = UpdateStep;
+		if (noiseChip.Period[i] <= 0) noiseChip.Period[i] = UpdateStep;
+	}
+}
+
 //Resets the sound chips, also used whenever sound options are changed
 void sound_init(int SampleRate)
 {
