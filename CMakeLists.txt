@@ -18,10 +18,12 @@ set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards)
 #set(PICO_PLATFORM "rp2040" CACHE STRING "Chip type")
 set(PICO_PLATFORM "rp2350" CACHE STRING "Chip type")
 
-# Board: murmulator (MURMULATOR 1.x) or olimex-pico-pc (Olimex RP2040-PICO-PC)
+# Board: murmulator (MURMULATOR 1.x), murmulator2 (MURMULATOR 2.0),
+# olimex-pico-pc (Olimex RP2040-PICO-PC) or waveshare_rp2350_pizero
 #set(PICO_BOARD "murmulator" CACHE STRING "Board type")
 #set(PICO_BOARD "olimex-pico-pc" CACHE STRING "Board type")
-set(PICO_BOARD "waveshare_rp2350_pizero" CACHE STRING "Board type")
+#set(PICO_BOARD "waveshare_rp2350_pizero" CACHE STRING "Board type")
+set(PICO_BOARD "murmulator2" CACHE STRING "Board type")
 
 cmake_minimum_required(VERSION 3.13)
 include(pico_sdk_import.cmake)
@@ -29,7 +31,7 @@ include(pico_sdk_import.cmake)
 project(ngpc C CXX ASM)
 SET(BUILD_NAME "${PROJECT_NAME}")
 
-option(I2S "Enable I2S sound" OFF)
+option(I2S "Enable I2S sound" ON)
 option(I2S_CS4334 "Enable I2S CS4334 sound" OFF)
 option(VGA "Enable VGA" OFF)
 option(TFT "Enable TFT display" OFF)
@@ -39,11 +41,8 @@ option(TV "Enable TV composite output" OFF)
 option(SOFTTV "Enable TV soft composite output" OFF)
 
 if (${PICO_BOARD} MATCHES "waveshare_rp2350_pizero")
-	# Waveshare RP2350-PiZero (z0p2): RP2350B, 16 MB flash, HDMI on GPIO32..39,
-	# sound through an I2S module (PCM5102A) on GP10..12, USB keyboard.
+	# Waveshare RP2350-PiZero (z0p2): RP2350B, 16 MB flash, HDMI on GPIO32..39
 	set(HDMI ON CACHE BOOL "Enable HDMI display" FORCE)
-	set(I2S ON CACHE BOOL "Enable I2S sound" FORCE)
-	set(I2S_CS4334 OFF CACHE BOOL "Enable I2S CS4334 sound" FORCE)
 endif()
 
 
@@ -100,6 +99,8 @@ else()
 		SET(BUILD_NAME "PCp2-${PROJECT_NAME}")
 	elseif (${PICO_BOARD} MATCHES "waveshare_rp2350_pizero")
 		SET(BUILD_NAME "z0p2-${PROJECT_NAME}")
+	elseif (${PICO_BOARD} MATCHES "murmulator2")
+		SET(BUILD_NAME "m2p2-${PROJECT_NAME}")
 	else()
 		SET(BUILD_NAME "m1p2-${PROJECT_NAME}")
 	endif()
@@ -169,7 +170,13 @@ ELSE()
 ENDIF()
 
 IF(NOT I2S)
-	target_compile_definitions(${PROJECT_NAME} PRIVATE AUDIO_PWM_PIN=26)
+	if (${PICO_BOARD} MATCHES "murmulator2")
+		# PWM on GP10/GP11 (one PWM slice)
+		target_compile_definitions(${PROJECT_NAME} PRIVATE AUDIO_PWM_PIN=10)
+		SET(BUILD_NAME "${BUILD_NAME}-PWM")
+	else()
+		target_compile_definitions(${PROJECT_NAME} PRIVATE AUDIO_PWM_PIN=26)
+	endif()
 ELSEIF(I2S_CS4334)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE I2S_CS4334)
 	SET(BUILD_NAME "${BUILD_NAME}-I2S-CS4334")

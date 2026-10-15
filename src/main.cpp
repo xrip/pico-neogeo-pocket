@@ -296,13 +296,9 @@ bool filebrowser_loadfile(const char pathname[256]) {
     FILINFO fileinfo;
     f_stat(pathname, &fileinfo);
     rom_size = fileinfo.fsize;
-#if ZERO
     /* The top 512 KB of the flash stay untouched (pico-launcher lives in the
        last 260 KB). */
     if (PICO_FLASH_SIZE_BYTES - (512u << 10) - FLASH_TARGET_OFFSET < ((fileinfo.fsize + FLASH_SECTOR_SIZE - 1) & ~(FLASH_SECTOR_SIZE - 1))) {
-#else
-    if (PICO_FLASH_SIZE_BYTES - FLASH_TARGET_OFFSET < fileinfo.fsize) {
-#endif
         draw_text("ERROR: ROM too large! Canceled!!", window_x + 1, window_y + 2, 13, 1);
         sleep_ms(5000);
         return false;
